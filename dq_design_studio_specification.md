@@ -72,7 +72,7 @@ The application has five pages accessible from a persistent left navigation side
 |---|------|----------------|
 | 1 | Population Authoring | Create, modify, and view population definitions |
 | 2 | Rule Authoring | Create, modify, and view rule definitions |
-| 3 | Config | Manage database connections |
+| 3 | Config | Manage database connections, GitHub configuration, and review checklists |
 | 4 | Export | Search and download rules and populations |
 | 5 | (Sidebar) Repo Browser | Browse the GitHub repo tree (accessible from authoring pages) |
 
@@ -171,6 +171,7 @@ On confirm:
 3. The `version` block is updated: `number` incremented, `compiled_at` set to current UTC timestamp, `compiled_checksum` computed as SHA-256 of the compiled query, `created_by` set from the authenticated user.
 4. The file is committed to the target branch.
 5. If the PR toggle is on, a pull request is opened with the commit message as the PR title and the change summary as the body.
+   - The PR description automatically includes the Population Review Checklist (see Section 5.9).
 6. A success banner displays the commit SHA and a link to the PR.
 
 ### 5.6 View Mode
@@ -180,6 +181,7 @@ When a population is opened read-only (e.g. from the Export page or when the use
 - The SQL action toolbar shows **Format** only (no Validate & Run).
 - A **Clone to new** button allows opening the population as a new draft.
 - The commit history panel is shown (see Section 5.7).
+- If the population status is `active`, a **Deprecate** button is available (see Section 5.11).
 
 ### 5.7 Commit History Panel
 
@@ -196,7 +198,45 @@ A collapsible panel below the form shows the Git log for the file:
 
 Clicking a row loads that historical version into the form in read-only mode with a **Restore as draft** option.
 
-### 5.8 Population Deletion and Deprecation
+### 5.9 Population Review Checklist
+
+When a pull request is created for a population change, the PR description automatically includes a configurable review checklist. Reviewers must tick all applicable items before approving the PR.
+
+#### Default Population Review Checklist
+
+- [ ] **Population Scope Verified**: The `population_description` accurately describes what records are included and excluded
+- [ ] **Source Table Exists**: Confirmed that `source.schema` and `source.table` exist in the target database
+- [ ] **Primary Key Valid**: The `source.primary_key` column is a valid unique identifier for the source table
+- [ ] **Column Selection Appropriate**: All columns in `source.select_cols` are necessary and exist in the source table
+- [ ] **Filter Clauses Correct**: All `source.filter` conditions are syntactically correct and produce the intended subset
+- [ ] **Partition Column Indexed**: If `source.partition_col` is specified, confirmed it has an index for performance
+- [ ] **Query Validated**: The `compiled_population_query` has been successfully validated against a non-production connection
+- [ ] **Performance Acceptable**: Query execution time and estimated row count are within acceptable limits
+- [ ] **Ownership Confirmed**: The `owner` email is correct and the owner has been notified
+- [ ] **Documentation Complete**: Business justification and technical details are clearly documented
+
+#### Checklist Configuration
+
+The checklist is stored in a configuration file `.dq-studio/review-checklists.yaml` in the GitHub repository:
+
+```yaml
+population_checklist:
+  - id: scope_verified
+    label: "Population Scope Verified"
+    description: "The population_description accurately describes what records are included and excluded"
+    required: true
+  - id: source_exists
+    label: "Source Table Exists"
+    description: "Confirmed that source.schema and source.table exist in the target database"
+    required: true
+  # Additional items...
+```
+
+- Teams can customize the checklist by editing this configuration file.
+- Each item can be marked as `required: true` (must be checked) or `required: false` (optional).
+- The application validates that all required items are checked before the PR can be merged (via GitHub branch protection rules or status checks).
+
+### 5.10 Population Deletion and Deprecation
 
 The application enforces referential integrity when deleting or deprecating populations:
 
@@ -216,6 +256,99 @@ The application enforces referential integrity when deleting or deprecating popu
 - Rules referencing a deprecated population show a warning banner: "This rule references deprecated population {population_id}. Consider updating to use an active population."
 - Deprecated populations are excluded from the `population_ref` dropdown for new rules, but existing references are preserved.
 - The Export page shows deprecated populations with a visual indicator (grayed out or strikethrough) and they can be filtered using the Status dropdown.
+
+### 5.11 Deprecation Workflow
+
+Both active and draft populations can be deprecated through a structured workflow that ensures proper documentation and impact analysis.
+
+#### Initiating Deprecation
+
+The **Deprecate** button is available:
+- In View Mode for active populations (Section 5.6)
+- In the authoring form action toolbar for populations in edit mode
+- From the Export page via a context menu on population rows
+
+Clicking **Deprecate** opens a modal dialog with the following form:
+
+#### Deprecation Form
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| Deprecation reason | Dropdown + Text area | Yes | Dropdown options: `Replaced by new population` / `Data source retired` / `Business requirement changed` / `Data quality issues` / `Other`. If "Replaced by new population" selected, an additional "Replacement Population ID" field appears. Text area for detailed explanation (minimum 50 characters). |
+| Effective date | Date picker | Yes | Date when the population should be considered deprecated. Can be set to today (immediate) or a future date. |
+| Notification list | Multi-value email input | No | Email addresses of stakeholders to notify about the deprecation |
+| Replacement population ID | Text (conditional) | Conditional | Required if deprecation reason is "Replaced by new population". Auto-complete from existing active populations. |
+| Migration deadline | Date picker (conditional) | Conditional | Required if dependent rules exist. Date by which dependent rules should migrate to an alternative population. |
+
+#### Impact Analysis
+
+Before the deprecation form is shown, the application performs an impact analysis:
+
+1. **Scans all rule files** in the same Control Model to identify dependencies
+2. **Categorizes dependent rules** by status:
+   - Active rules (status = `active`)
+   - Draft rules (status = `draft`)
+   - Deprecated rules (status = `deprecated`)
+3. **Displays impact summary** in the modal above the form:
+   ```
+   Impact Analysis
+   ⚠️ This population is referenced by:
+   - 5 active rules
+   - 2 draft rules
+   - 1 deprecated rule
+   
+   View Dependent Rules
+   ```
+4. **"View Dependent Rules" link** opens a table showing: Rule ID, Rule Name, Status, Owner, Last Updated
+5. If no active or draft rules depend on the population, displays: "✓ No active dependencies found. Safe to deprecate."
+
+#### Deprecation Process
+
+On form submission:
+
+1. **YAML Update**: The application updates the population YAML:
+   ```yaml
+   version:
+     status: deprecated
+     deprecated_at: <effective_date_UTC>
+     deprecated_by: <authenticated_user>
+     deprecation_reason: <reason_category>
+     deprecation_notes: <detailed_explanation>
+     replacement_population_id: <replacement_id>  # if applicable
+     migration_deadline: <deadline_date_UTC>  # if applicable
+   ```
+
+2. **Commit Creation**: A commit is created with:
+   - Message: `chore(deprecate): <population_id> - <reason_category>`
+   - Branch: `deprecate/<population_id>-<date>`
+   - Body includes the full impact analysis and deprecation details
+
+3. **Pull Request Creation**: If enabled, a PR is opened with:
+   - Title: `Deprecate Population: <population_id>`
+   - Body includes:
+     - Deprecation reason and detailed notes
+     - Impact analysis (list of dependent rules)
+     - Effective date and migration deadline (if applicable)
+     - Replacement population (if applicable)
+     - Population Review Checklist (modified for deprecation)
+   - Labels: `deprecation`, `population`
+
+4. **Notification**: If email addresses were provided in the notification list:
+   - Comment is added to the PR mentioning the notification list
+   - GitHub will notify those users (if they have repository access)
+   - For external stakeholders, a note is added: "Please notify: <email_list>"
+
+5. **Dependent Rules Update** (optional): 
+   - If dependent rules exist, a banner in the PR description states: "Action required: Update dependent rules before <migration_deadline>"
+   - The PR can include an optional GitHub issue creation to track the migration
+
+#### Post-Deprecation Behavior
+
+- Deprecated populations remain in the repository and are still accessible in View Mode
+- The population form displays a prominent deprecation banner showing the reason, effective date, and replacement (if any)
+- Rules referencing deprecated populations show a warning banner during authoring
+- In the Export page, deprecated populations are shown with a strikethrough and a "Deprecated" badge
+- The "Referenced by" count in Export page includes a breakdown: "X active, Y draft, Z deprecated rules"
 
 The form is organised into four sections.
 
@@ -312,9 +445,178 @@ Same modal and process as Population Authoring (Section 5.5) with one addition:
 | Compile status | ✓ Valid |
 | Warnings | 1 (index warning on REGION_CODE) |
 
+- The PR description automatically includes the Rule Review Checklist (see Section 6.7).
+
 ### 6.6 View Mode and Commit History
 
 Same behaviour as Population Authoring (Section 5.6 and 5.7).
+
+- If the rule status is `active`, a **Deprecate** button is available (see Section 6.8).
+
+### 6.7 Rule Review Checklist
+
+When a pull request is created for a rule change, the PR description automatically includes a configurable review checklist. Reviewers must tick all applicable items before approving the PR.
+
+#### Default Rule Review Checklist
+
+- [ ] **KDE Reference Correct**: Confirmed that all KDE fields (`kde_id`, `kde_term`, `kde_server`, `kde_database`, `kde_table`, `kde_column`) match the enterprise data catalogue
+- [ ] **Population Scope Verified**: The referenced population (`population_ref`) accurately represents the intended scope for this rule
+- [ ] **Population Active**: The referenced population has status = `active` and is not deprecated
+- [ ] **Target Column Valid**: The `condition.target_col` exists in the referenced population's `select_cols`
+- [ ] **Condition Logic Correct**: The `condition.type`, `operator`, and `value` accurately represent the intended data quality check
+- [ ] **Threshold Calibrated**: The `fail_if_pct_gt` and `warn_if_pct_gt` thresholds have been calibrated against a baseline run on real data
+- [ ] **Rationale Complete**: The `rule_rationale` includes reference to the governing policy, regulation, or business requirement
+- [ ] **Severity Appropriate**: The `severity` level matches the business impact of rule failures
+- [ ] **Query Validated**: The `compiled_rule_query` has been successfully validated and test-run against non-production data
+- [ ] **Performance Acceptable**: Query execution time is within acceptable limits for scheduled execution
+- [ ] **Ownership Confirmed**: The `owner` email is correct and the owner has been notified
+- [ ] **Documentation Complete**: Technical description and business rationale are clearly documented
+- [ ] **Failure Output Configured**: The `output.max_failure_rows` is set to a reasonable limit (typically 1000-5000)
+
+#### Checklist Configuration
+
+The checklist is stored in the same configuration file `.dq-studio/review-checklists.yaml` in the GitHub repository:
+
+```yaml
+rule_checklist:
+  - id: kde_correct
+    label: "KDE Reference Correct"
+    description: "Confirmed that all KDE fields match the enterprise data catalogue"
+    required: true
+  - id: population_verified
+    label: "Population Scope Verified"
+    description: "The referenced population accurately represents the intended scope"
+    required: true
+  - id: threshold_calibrated
+    label: "Threshold Calibrated"
+    description: "Thresholds have been calibrated against baseline run on real data"
+    required: true
+  - id: rationale_policy
+    label: "Rationale Complete"
+    description: "Rule rationale includes reference to governing policy or regulation"
+    required: true
+  # Additional items...
+```
+
+- Teams can customize the checklist by editing this configuration file.
+- Each item can be marked as `required: true` (must be checked) or `required: false` (optional).
+- The application validates that all required items are checked before the PR can be merged (via GitHub branch protection rules or status checks).
+
+#### Checklist Enforcement
+
+For both population and rule checklists:
+- GitHub branch protection can be configured to require status checks from a checklist validation bot.
+- The bot reads the PR description, parses the checklist items, and fails the status check if any required items are unchecked.
+- Optional: The Config page can include a section to enable/disable checklist enforcement and customize checklist items via a UI (instead of direct YAML editing).
+
+### 6.8 Deprecation Workflow
+
+Both active and draft rules can be deprecated through a structured workflow that ensures proper documentation and impact analysis.
+
+#### Initiating Deprecation
+
+The **Deprecate** button is available:
+- In View Mode for active rules (Section 6.6)
+- In the authoring form action toolbar for rules in edit mode
+- From the Export page via a context menu on rule rows
+
+Clicking **Deprecate** opens a modal dialog with the following form:
+
+#### Deprecation Form
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| Deprecation reason | Dropdown + Text area | Yes | Dropdown options: `Replaced by new rule` / `Business requirement changed` / `KDE retired` / `Population no longer valid` / `False positive rate too high` / `Other`. If "Replaced by new rule" selected, an additional "Replacement Rule ID" field appears. Text area for detailed explanation (minimum 50 characters). |
+| Effective date | Date picker | Yes | Date when the rule should stop executing. Can be set to today (immediate) or a future date. |
+| Notification list | Multi-value email input | No | Email addresses of stakeholders to notify about the deprecation |
+| Replacement rule ID | Text (conditional) | Conditional | Required if deprecation reason is "Replaced by new rule". Auto-complete from existing active rules. |
+| Historical data retention | Dropdown | Yes | Options: `Retain all historical results` / `Archive results older than 90 days` / `Delete all results`. Default: `Retain all historical results` |
+
+#### Impact Analysis
+
+Before the deprecation form is shown, the application performs an impact analysis:
+
+1. **Identifies downstream consumers** by checking:
+   - Scheduled execution jobs referencing this rule
+   - Dashboards or reports that display this rule's results
+   - Alert configurations tied to this rule
+   - Other rules that may have dependencies (documented in `related_rules` if present)
+   
+2. **Displays impact summary** in the modal above the form:
+   ```
+   Impact Analysis
+   ⚠️ This rule is currently:
+   - Scheduled for execution in 3 jobs
+   - Referenced in 2 dashboards
+   - Configured with 1 active alert
+   
+   View Details
+   ```
+   
+3. **"View Details" link** opens a detailed breakdown showing:
+   - Job names and schedules
+   - Dashboard/report names
+   - Alert configurations
+   - Related rules (if any)
+   
+4. If no dependencies are found, displays: "✓ No active dependencies found. Safe to deprecate."
+
+#### Deprecation Process
+
+On form submission:
+
+1. **YAML Update**: The application updates the rule YAML:
+   ```yaml
+   version:
+     status: deprecated
+     deprecated_at: <effective_date_UTC>
+     deprecated_by: <authenticated_user>
+     deprecation_reason: <reason_category>
+     deprecation_notes: <detailed_explanation>
+     replacement_rule_id: <replacement_id>  # if applicable
+   execution:
+     enabled: false
+     disabled_at: <effective_date_UTC>
+   ```
+
+2. **Commit Creation**: A commit is created with:
+   - Message: `chore(deprecate): <rule_id> - <reason_category>`
+   - Branch: `deprecate/<rule_id>-<date>`
+   - Body includes the full impact analysis and deprecation details
+
+3. **Pull Request Creation**: If enabled, a PR is opened with:
+   - Title: `Deprecate Rule: <rule_id> - <rule_name>`
+   - Body includes:
+     - Deprecation reason and detailed notes
+     - Impact analysis (jobs, dashboards, alerts affected)
+     - Effective date
+     - Replacement rule (if applicable)
+     - Historical data retention policy
+     - Rule Review Checklist (modified for deprecation)
+   - Labels: `deprecation`, `rule`
+
+4. **Notification**: If email addresses were provided in the notification list:
+   - Comment is added to the PR mentioning the notification list
+   - GitHub will notify those users (if they have repository access)
+   - For external stakeholders, a note is added: "Please notify: <email_list>"
+
+5. **Downstream Impact Actions**:
+   - If downstream consumers exist, the PR description includes: "⚠️ Action Required: Update the following before merging:"
+     - List of jobs that need rule removed
+     - List of dashboards that need rule removed
+     - List of alerts that need reconfiguration
+   - Optionally, create linked GitHub issues for each category of downstream impact
+
+#### Post-Deprecation Behavior
+
+- Deprecated rules remain in the repository and are still accessible in View Mode
+- The rule form displays a prominent deprecation banner showing the reason, effective date, and replacement (if any)
+- Deprecated rules are excluded from:
+   - Scheduled execution (unless explicitly overridden)
+   - New dashboard configurations
+   - Alert rule selection dropdowns
+- In the Export page, deprecated rules are shown with a strikethrough and a "Deprecated" badge
+- The Export page can filter to show: `Active only`, `Include deprecated`, or `Deprecated only`
 
 ---
 
@@ -341,7 +643,9 @@ The Repo Browser is a sidebar panel accessible from both authoring pages via an 
 
 ### 8.1 Purpose
 
-Manages Snowflake database connections that are used by the SQL validation actions in both authoring pages.
+Manages Snowflake database connections that are used by the SQL validation actions in both authoring pages, GitHub repository configuration, and review checklist settings.
+
+The page is organized into three tabs: **GitHub**, **Snowflake Connections**, and **Review Checklists**.
 
 ### 8.2 GitHub Configuration
 
@@ -382,6 +686,37 @@ Connections are listed in a table with columns: Name, Account, Database, Schema,
 
 - Credentials are stored in Streamlit secrets or an environment-configured secrets manager (e.g. AWS Secrets Manager). They are never written to the GitHub repository or logged.
 - Production connections are always labelled and blocked from full query execution to prevent accidental large reads.
+
+### 8.5 Review Checklists Configuration
+
+The Config page includes a **Review Checklists** tab for managing the population and rule review checklists.
+
+#### Checklist Editor
+
+Displays two sections: **Population Review Checklist** and **Rule Review Checklist**. Each section shows:
+
+- A table of checklist items with columns: Order (drag-to-reorder), Label, Description, Required (toggle), Actions (Edit, Delete)
+- An **Add Item** button to create new checklist items
+- A **Preview** button to see how the checklist will render in PR descriptions
+- A **Reset to Defaults** button to restore the original checklist configuration
+
+#### Add/Edit Checklist Item Form
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| Item ID | Text | Yes | Unique identifier (e.g., `kde_correct`, `scope_verified`). Auto-generated from label if not provided. |
+| Label | Text | Yes | Short title displayed in the checklist (e.g., "KDE Reference Correct") |
+| Description | Text area | Yes | Detailed explanation of what the reviewer should verify |
+| Required | Toggle | Yes | If enabled, this item must be checked before PR can be merged |
+| Order | Number | Yes | Display order in the checklist (auto-assigned, can be reordered via drag-and-drop) |
+
+#### Checklist Validation Settings
+
+- **Enable Checklist Enforcement** (toggle): When enabled, attempts to integrate with GitHub status checks to validate that all required items are checked before merge
+- **Validation Bot Webhook URL** (text): Optional webhook URL for a custom validation service
+- **Bypass for Admins** (toggle): If enabled, users with admin GitHub permissions can merge without completing the checklist
+
+Changes to checklists are committed to `.dq-studio/review-checklists.yaml` in the repository and versioned like other configuration.
 
 ---
 
@@ -496,7 +831,40 @@ The application assembles YAML files programmatically using a strict field order
 
 ---
 
-## 12. Out of Scope (Version 1.0)
+## 12. Review Workflow
+
+### 12.1 Pull Request Review Process
+
+The application integrates with GitHub's pull request workflow:
+
+1. **Author commits changes** using the Save & Commit button in either authoring page
+2. **PR created automatically** with:
+   - Conventional commit message as title
+   - Summary table of changes
+   - Appropriate review checklist (Population or Rule)
+3. **Reviewers receive notification** via GitHub
+4. **Reviewers complete checklist** by ticking items in the PR description
+5. **Checklist validation** (if enabled):
+   - GitHub status check verifies all required items are checked
+   - PR cannot be merged until validation passes
+6. **PR approved and merged** following standard GitHub workflow
+7. **Changes deployed** to the main branch and become active
+
+### 12.2 Checklist Management
+
+**Viewing current checklists**: The Config page includes a **Review Checklists** tab showing the current configuration for both population and rule checklists.
+
+**Editing checklists**: Users with admin access can:
+- Add, remove, or reorder checklist items
+- Mark items as required or optional
+- Edit item labels and descriptions
+- Preview how the checklist will appear in PR descriptions
+
+**Version control**: The `.dq-studio/review-checklists.yaml` file is version-controlled, so checklist changes are auditable and can be rolled back if needed.
+
+---
+
+## 13. Out of Scope (Version 1.0)
 
 The following are explicitly excluded from this version:
 
@@ -506,3 +874,7 @@ The following are explicitly excluded from this version:
 - Support for database engines other than Snowflake
 - Role-based access control beyond GitHub repository permissions
 - Inline diff view when opening a file from a non-main branch (commit diff is viewable on GitHub via the PR link)
+- Automated checklist validation bot (teams must configure GitHub Actions or third-party integrations manually)
+- Email notifications for checklist reminders (handled by GitHub notifications)
+- Automated downstream impact detection for rule deprecation (detection of jobs, dashboards, alerts requires manual configuration or external integration)
+- Automatic removal of deprecated rules from downstream systems (manual intervention required)
