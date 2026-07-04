@@ -1,50 +1,82 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+# SAMPLE_PROJECT Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Code Quality First
+- All code must be clean, readable, and well-documented
+- Follow PEP 8 style guide for Python code
+- Meaningful variable and function names required
+- Complex logic must include inline comments explaining the "why"
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+### II. Configuration as Code
+- All configurations stored in version-controlled YAML files
+- Configuration changes tracked through Git
+- Clear naming conventions for configuration files
+- Schema validation for all YAML configurations
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### III. Test-Driven Development
+- Write tests before implementing features
+- Unit tests required for all new functions and classes
+- Integration tests for API endpoints and data pipelines
+- Minimum 80% code coverage for core functionality
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+### IV. Data Quality Standards
+- Input validation on all data entry points
+- Error handling with clear, actionable error messages
+- Data integrity checks at each processing stage
+- Logging of all data transformations
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### V. Simplicity and Maintainability
+- YAGNI (You Aren't Gonna Need It) - implement only what's required
+- DRY (Don't Repeat Yourself) - extract common functionality
+- Clear separation of concerns
+- Modular design with single responsibility principle
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+## Technology Standards
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+### Required Stack
+- **Language**: Python 3.8+
+- **Configuration**: YAML for all config files
+- **Version Control**: Git with meaningful commit messages
+- **Documentation**: Inline code comments and README files
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+### Code Organization
+- Separate configuration, source code, and tests
+- Use virtual environments for Python dependencies
+- Keep dependencies minimal and well-documented
+- Requirements.txt or pyproject.toml for dependency management
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+## Development Workflow
+
+### Version Control Practices
+- Meaningful commit messages describing the change
+- Small, focused commits (one logical change per commit)
+- Review changes before committing
+- Regular pushes to remote repository
+
+### Code Review
+- Self-review before sharing code
+- Test locally before committing
+- Document any known limitations or future improvements
+
+### Quality Gates
+- Code must run without errors
+- All tests must pass before commit
+- No sensitive data (passwords, keys) in code or config
+- Follow security best practices
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+### Enforcement
+- This constitution guides all development decisions
+- Deviations must be documented and justified
+- Regular reviews to ensure compliance
+- Constitution may be amended as project evolves
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+### Continuous Improvement
+- Learn from mistakes and update practices
+- Document lessons learned
+- Keep constitution up-to-date with project needs
+- Encourage suggestions for improvements
+
+**Version**: 1.0.0 | **Ratified**: 2026-07-04 | **Last Amended**: 2026-07-04
