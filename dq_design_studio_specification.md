@@ -21,6 +21,11 @@ DQ Design Studio is a Streamlit-based web application that provides a structured
 - Q: What timeout limits should apply to SQL query execution? → A: 60-second timeout; automatically retry once before failing
 - Q: What happens when deleting/deprecating a population referenced by active rules? → A: Allow deletion only if all dependent rules are deprecated/inactive first
 - Q: How should population_version_pin behave - strictly enforced or advisory? → A: Pin is advisory only; rule always uses latest population version regardless of pin value
+- Q: What format should review checklists use in PR descriptions? → A: GitHub task list markdown format (`- [ ]` / `- [x]`) enabling interactive checkboxes
+- Q: How should rule deprecation handle downstream impact detection (jobs, dashboards, alerts)? → A: Skip impact analysis entirely; show deprecation form without dependency information
+- Q: Is the checklist validation bot part of DQ Design Studio or external? → A: Out of scope for v1.0; teams use existing GitHub Actions or third-party apps
+- Q: How should historical data retention be implemented when deprecating rules? → A: Trigger webhook to external data retention service with retention policy
+- Q: How should replacement population/rule IDs be used after deprecation? → A: Documentation-only; displayed in warnings and PR description
 
 ---
 
@@ -72,7 +77,7 @@ The application has five pages accessible from a persistent left navigation side
 |---|------|----------------|
 | 1 | Population Authoring | Create, modify, and view population definitions |
 | 2 | Rule Authoring | Create, modify, and view rule definitions |
-| 3 | Config | Manage database connections, GitHub configuration, and review checklists |
+| 3 | Config | Manage database connections, GitHub configuration, review checklists, and data retention webhooks |
 | 4 | Export | Search and download rules and populations |
 | 5 | (Sidebar) Repo Browser | Browse the GitHub repo tree (accessible from authoring pages) |
 
@@ -200,9 +205,22 @@ Clicking a row loads that historical version into the form in read-only mode wit
 
 ### 5.9 Population Review Checklist
 
-When a pull request is created for a population change, the PR description automatically includes a configurable review checklist. Reviewers must tick all applicable items before approving the PR.
+When a pull request is created for a population change, the PR description automatically includes a configurable review checklist using GitHub task list markdown format. Reviewers can check items directly in the PR description by clicking the checkboxes.
 
 #### Default Population Review Checklist
+
+The checklist is rendered in the PR description as GitHub task list markdown:
+
+```markdown
+- [ ] **Population Scope Verified**: The `population_description` accurately describes what records are included and excluded
+- [ ] **Source Table Exists**: Confirmed that `source.schema` and `source.table` exist in the target database
+- [ ] **Primary Key Valid**: The `source.primary_key` column is a valid unique identifier for the source table
+...
+```
+
+Reviewers check items by clicking directly in the GitHub UI, which updates the markdown from `- [ ]` to `- [x]`.
+
+#### Default Checklist Items
 
 - [ ] **Population Scope Verified**: The `population_description` accurately describes what records are included and excluded
 - [ ] **Source Table Exists**: Confirmed that `source.schema` and `source.table` exist in the target database
@@ -234,7 +252,7 @@ population_checklist:
 
 - Teams can customize the checklist by editing this configuration file.
 - Each item can be marked as `required: true` (must be checked) or `required: false` (optional).
-- The application validates that all required items are checked before the PR can be merged (via GitHub branch protection rules or status checks).
+- The `required` flag is advisory for v1.0; teams implementing their own validation can use it to determine which items must be checked before merge.
 
 ### 5.10 Population Deletion and Deprecation
 
@@ -329,7 +347,8 @@ On form submission:
      - Deprecation reason and detailed notes
      - Impact analysis (list of dependent rules)
      - Effective date and migration deadline (if applicable)
-     - Replacement population (if applicable)
+     - Replacement population (if applicable): "Recommended replacement: <replacement_population_id>"
+     - List of dependent rules that should be migrated
      - Population Review Checklist (modified for deprecation)
    - Labels: `deprecation`, `population`
 
@@ -346,9 +365,13 @@ On form submission:
 
 - Deprecated populations remain in the repository and are still accessible in View Mode
 - The population form displays a prominent deprecation banner showing the reason, effective date, and replacement (if any)
-- Rules referencing deprecated populations show a warning banner during authoring
+- If a replacement population is specified, the banner includes: "This population has been deprecated. Please use <replacement_population_id> instead."
+- Rules referencing deprecated populations show a warning banner during authoring: "Warning: Population <population_id> is deprecated. Consider migrating to <replacement_population_id>." (if replacement specified)
 - In the Export page, deprecated populations are shown with a strikethrough and a "Deprecated" badge
 - The "Referenced by" count in Export page includes a breakdown: "X active, Y draft, Z deprecated rules"
+- Clicking on a deprecated population in Export page shows the deprecation details including replacement recommendation
+
+**Note**: The replacement population ID is documentation-only. The application does not automatically migrate rule references. Users must manually update rules to reference the replacement population.
 
 The form is organised into four sections.
 
@@ -455,9 +478,23 @@ Same behaviour as Population Authoring (Section 5.6 and 5.7).
 
 ### 6.7 Rule Review Checklist
 
-When a pull request is created for a rule change, the PR description automatically includes a configurable review checklist. Reviewers must tick all applicable items before approving the PR.
+When a pull request is created for a rule change, the PR description automatically includes a configurable review checklist using GitHub task list markdown format. Reviewers can check items directly in the PR description by clicking the checkboxes.
 
 #### Default Rule Review Checklist
+
+The checklist is rendered in the PR description as GitHub task list markdown:
+
+```markdown
+- [ ] **KDE Reference Correct**: Confirmed that all KDE fields match the enterprise data catalogue
+- [ ] **Population Scope Verified**: The referenced population accurately represents the intended scope
+- [ ] **Threshold Calibrated**: Thresholds have been calibrated against baseline run on real data
+- [ ] **Rationale Complete**: Rule rationale includes reference to governing policy or regulation
+...
+```
+
+Reviewers check items by clicking directly in the GitHub UI, which updates the markdown from `- [ ]` to `- [x]`.
+
+#### Default Checklist Items
 
 - [ ] **KDE Reference Correct**: Confirmed that all KDE fields (`kde_id`, `kde_term`, `kde_server`, `kde_database`, `kde_table`, `kde_column`) match the enterprise data catalogue
 - [ ] **Population Scope Verified**: The referenced population (`population_ref`) accurately represents the intended scope for this rule
@@ -500,14 +537,19 @@ rule_checklist:
 
 - Teams can customize the checklist by editing this configuration file.
 - Each item can be marked as `required: true` (must be checked) or `required: false` (optional).
-- The application validates that all required items are checked before the PR can be merged (via GitHub branch protection rules or status checks).
+- The `required` flag is advisory for v1.0; teams implementing their own validation can use it to determine which items must be checked before merge.
 
 #### Checklist Enforcement
 
 For both population and rule checklists:
-- GitHub branch protection can be configured to require status checks from a checklist validation bot.
-- The bot reads the PR description, parses the checklist items, and fails the status check if any required items are unchecked.
-- Optional: The Config page can include a section to enable/disable checklist enforcement and customize checklist items via a UI (instead of direct YAML editing).
+- Checklists use GitHub's native task list markdown syntax (`- [ ]` for unchecked, `- [x]` for checked).
+- Reviewers manually check items by clicking checkboxes in the PR description.
+- **Automated validation is out of scope for v1.0.** Teams can optionally configure their own enforcement using:
+  - GitHub Actions workflows that parse PR descriptions and check for unchecked required items
+  - Third-party GitHub Apps like PR Checklist Bot or similar tools
+  - GitHub branch protection rules requiring specific reviewers who ensure checklist completion
+- The `.dq-studio/review-checklists.yaml` configuration file marks items as `required: true` or `required: false` for teams implementing their own validation logic.
+- The Config page Review Checklists tab is provided for convenient checklist management but does not include enforcement capabilities in v1.0.
 
 ### 6.8 Deprecation Workflow
 
@@ -528,38 +570,13 @@ Clicking **Deprecate** opens a modal dialog with the following form:
 |-------|------|----------|-------|
 | Deprecation reason | Dropdown + Text area | Yes | Dropdown options: `Replaced by new rule` / `Business requirement changed` / `KDE retired` / `Population no longer valid` / `False positive rate too high` / `Other`. If "Replaced by new rule" selected, an additional "Replacement Rule ID" field appears. Text area for detailed explanation (minimum 50 characters). |
 | Effective date | Date picker | Yes | Date when the rule should stop executing. Can be set to today (immediate) or a future date. |
-| Notification list | Multi-value email input | No | Email addresses of stakeholders to notify about the deprecation |
+| Notification list | Multi-value email input | No | Email addresses of stakeholders to notify about the deprecation. Users should manually identify and list stakeholders who need to be informed. |
 | Replacement rule ID | Text (conditional) | Conditional | Required if deprecation reason is "Replaced by new rule". Auto-complete from existing active rules. |
-| Historical data retention | Dropdown | Yes | Options: `Retain all historical results` / `Archive results older than 90 days` / `Delete all results`. Default: `Retain all historical results` |
+| Historical data retention | Dropdown | Yes | Options: `Retain all historical results` / `Archive results older than 90 days` / `Delete all results`. Default: `Retain all historical results`. This policy is passed to the configured data retention service via webhook. |
 
-#### Impact Analysis
+**Note**: Version 1.0 does not include automated downstream impact detection. Users are responsible for manually identifying and notifying affected stakeholders (job owners, dashboard maintainers, alert recipients) before deprecating a rule.
 
-Before the deprecation form is shown, the application performs an impact analysis:
-
-1. **Identifies downstream consumers** by checking:
-   - Scheduled execution jobs referencing this rule
-   - Dashboards or reports that display this rule's results
-   - Alert configurations tied to this rule
-   - Other rules that may have dependencies (documented in `related_rules` if present)
-   
-2. **Displays impact summary** in the modal above the form:
-   ```
-   Impact Analysis
-   ⚠️ This rule is currently:
-   - Scheduled for execution in 3 jobs
-   - Referenced in 2 dashboards
-   - Configured with 1 active alert
-   
-   View Details
-   ```
-   
-3. **"View Details" link** opens a detailed breakdown showing:
-   - Job names and schedules
-   - Dashboard/report names
-   - Alert configurations
-   - Related rules (if any)
-   
-4. If no dependencies are found, displays: "✓ No active dependencies found. Safe to deprecate."
+**Note**: Version 1.0 does not include automated downstream impact detection. Users are responsible for manually identifying and notifying affected stakeholders (job owners, dashboard maintainers, alert recipients) before deprecating a rule.
 
 #### Deprecation Process
 
@@ -588,10 +605,10 @@ On form submission:
    - Title: `Deprecate Rule: <rule_id> - <rule_name>`
    - Body includes:
      - Deprecation reason and detailed notes
-     - Impact analysis (jobs, dashboards, alerts affected)
      - Effective date
-     - Replacement rule (if applicable)
+     - Replacement rule (if applicable): "Recommended replacement: <replacement_rule_id>"
      - Historical data retention policy
+     - Notification list (stakeholders to inform)
      - Rule Review Checklist (modified for deprecation)
    - Labels: `deprecation`, `rule`
 
@@ -600,23 +617,38 @@ On form submission:
    - GitHub will notify those users (if they have repository access)
    - For external stakeholders, a note is added: "Please notify: <email_list>"
 
-5. **Downstream Impact Actions**:
-   - If downstream consumers exist, the PR description includes: "⚠️ Action Required: Update the following before merging:"
-     - List of jobs that need rule removed
-     - List of dashboards that need rule removed
-     - List of alerts that need reconfiguration
-   - Optionally, create linked GitHub issues for each category of downstream impact
+5. **Success Confirmation**: A success banner displays the commit SHA and a link to the PR, along with a reminder: "Remember to update any downstream jobs, dashboards, or alerts that reference this rule."
+
+6. **Data Retention Webhook** (if configured):
+   - If a data retention webhook URL is configured in the Config page, the application triggers a POST request to the webhook endpoint with the following payload:
+   ```json
+   {
+     "event": "rule_deprecated",
+     "rule_id": "<rule_id>",
+     "rule_name": "<rule_name>",
+     "effective_date": "<YYYY-MM-DD>",
+     "retention_policy": "retain_all|archive_90_days|delete_all",
+     "deprecated_by": "<user_email>",
+     "timestamp": "<UTC_timestamp>"
+   }
+   ```
+   - The external data retention service can then execute the appropriate data lifecycle actions based on the retention policy.
+   - If the webhook call fails, a warning banner is displayed but the deprecation PR still succeeds (data retention is decoupled from the deprecation workflow).
 
 #### Post-Deprecation Behavior
 
 - Deprecated rules remain in the repository and are still accessible in View Mode
 - The rule form displays a prominent deprecation banner showing the reason, effective date, and replacement (if any)
+- If a replacement rule is specified, the banner includes: "This rule has been deprecated. Please use <replacement_rule_id> instead."
 - Deprecated rules are excluded from:
    - Scheduled execution (unless explicitly overridden)
    - New dashboard configurations
    - Alert rule selection dropdowns
 - In the Export page, deprecated rules are shown with a strikethrough and a "Deprecated" badge
 - The Export page can filter to show: `Active only`, `Include deprecated`, or `Deprecated only`
+- When viewing a deprecated rule in the Export page, the deprecation details are displayed including the replacement recommendation
+
+**Note**: The replacement rule ID is documentation-only. The application does not automatically update downstream systems (jobs, dashboards, alerts). Users must manually update these systems to reference the replacement rule.
 
 ---
 
@@ -643,9 +675,9 @@ The Repo Browser is a sidebar panel accessible from both authoring pages via an 
 
 ### 8.1 Purpose
 
-Manages Snowflake database connections that are used by the SQL validation actions in both authoring pages, GitHub repository configuration, and review checklist settings.
+Manages Snowflake database connections that are used by the SQL validation actions in both authoring pages, GitHub repository configuration, review checklist settings, and data retention webhook configuration.
 
-The page is organized into three tabs: **GitHub**, **Snowflake Connections**, and **Review Checklists**.
+The page is organized into three tabs: **GitHub**, **Snowflake Connections**, and **Review Checklists**, and **Data Retention**.
 
 ### 8.2 GitHub Configuration
 
@@ -712,11 +744,40 @@ Displays two sections: **Population Review Checklist** and **Rule Review Checkli
 
 #### Checklist Validation Settings
 
-- **Enable Checklist Enforcement** (toggle): When enabled, attempts to integrate with GitHub status checks to validate that all required items are checked before merge
-- **Validation Bot Webhook URL** (text): Optional webhook URL for a custom validation service
-- **Bypass for Admins** (toggle): If enabled, users with admin GitHub permissions can merge without completing the checklist
+The Config page Review Checklists tab provides information about implementing optional validation:
+
+- **Enforcement Guidance** section with links to:
+  - Example GitHub Actions workflows for checklist validation
+  - Recommended third-party GitHub Apps
+  - Documentation on configuring branch protection rules
+- **Webhook URL** (informational field): Display-only field showing where teams can configure their validation service webhook if implemented
+- Note: "Automated checklist validation is not included in v1.0. Configure external tools using the `.dq-studio/review-checklists.yaml` file to identify required vs optional items."
 
 Changes to checklists are committed to `.dq-studio/review-checklists.yaml` in the repository and versioned like other configuration.
+
+### 8.6 Data Retention Webhook Configuration
+
+The Config page includes a **Data Retention** tab for configuring the optional webhook that is triggered when rules are deprecated.
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| Enable data retention webhook | Toggle | Yes | When enabled, deprecation events trigger a webhook call |
+| Webhook URL | Text | Conditional | Required if enabled. HTTPS endpoint of the data retention service |
+| Authentication method | Dropdown | Conditional | Options: `None` / `Bearer token` / `API key header` / `Basic auth`. Required if enabled. |
+| Bearer token / API key | Password input | Conditional | Required if authentication method uses token or API key |
+| API key header name | Text | Conditional | Required if "API key header" selected (e.g., `X-API-Key`) |
+| Username | Text | Conditional | Required if "Basic auth" selected |
+| Password | Password input | Conditional | Required if "Basic auth" selected |
+| Timeout (seconds) | Number | Yes | Default: 10. Maximum time to wait for webhook response |
+| Retry on failure | Toggle | Yes | Default: off. If enabled, retry up to 3 times with exponential backoff |
+
+#### Test Webhook
+
+- **Test** button sends a sample deprecation payload to the configured endpoint
+- Displays the HTTP response status and body
+- Helps verify the webhook configuration before actual use
+
+**Security Note**: Webhook credentials are stored encrypted in the same secure storage as database credentials (Streamlit secrets or secrets manager).
 
 ---
 
@@ -874,7 +935,7 @@ The following are explicitly excluded from this version:
 - Support for database engines other than Snowflake
 - Role-based access control beyond GitHub repository permissions
 - Inline diff view when opening a file from a non-main branch (commit diff is viewable on GitHub via the PR link)
-- Automated checklist validation bot (teams must configure GitHub Actions or third-party integrations manually)
+- **Automated checklist validation** - Teams must configure GitHub Actions, third-party apps, or manual review processes to enforce checklist completion
 - Email notifications for checklist reminders (handled by GitHub notifications)
-- Automated downstream impact detection for rule deprecation (detection of jobs, dashboards, alerts requires manual configuration or external integration)
+- Automated downstream impact detection for rule deprecation (detection of jobs, dashboards, alerts requires manual identification or external integration)
 - Automatic removal of deprecated rules from downstream systems (manual intervention required)
